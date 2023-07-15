@@ -18,4 +18,4 @@ WORKDIR /opt/godot-videodecoder
 COPY . .
 RUN scons -c platform=x11
 RUN scons platform=x11 prefix="${FINAL_TARGET_DIR}"
-RUN ldd /opt/target/x11/libgdnative_videodecoder.so
+RUN ldd /opt/target/x11/libgdextension_videodecoder.so

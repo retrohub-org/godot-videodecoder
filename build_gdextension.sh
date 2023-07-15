@@ -4,10 +4,10 @@
 # by following these instructions: https://github.com/tpoechtrager/osxcross#packaging-the-sdk
 # NOTE: for darwin15 support use: https://developer.apple.com/download/more/?name=Xcode%207.3.1
 # To use a different MacOSX*.*.sdk.tar.gz sdk set XCODE_SDK
-# e.g. XCODE_SDK=$PWD/darwin_sdk/MacOSX10.15.sdk.tar.gz ./build_gdnative.sh
+# e.g. XCODE_SDK=$PWD/darwin_sdk/MacOSX10.15.sdk.tar.gz ./build_gdextension.sh
 
-# usage: ADDON_BIN_DIR=$PWD/godot/addons/bin ./contrib/godot-videodecoder/build_gdnative.sh
-# (from within your project where this is a submodule installed at ./contrib/godot-videodecoder/build_gdnative.sh/)
+# usage: ADDON_BIN_DIR=$PWD/godot/addons/bin ./contrib/godot-videodecoder/build_gdextension.sh
+# (from within your project where this is a submodule installed at ./contrib/godot-videodecoder/build_gdextension.sh/)
 
 # The Dockerfile will run a container to compile everything:
 # http://docs.godotengine.org/en/3.2/development/compiling/compiling_for_x11.html
@@ -24,17 +24,17 @@ XCODE_SDK="${XCODE_SDK:-$XCODE_SDK_FOR_COPY}"
 FF_ENABLE="vp8 vp9 opus vorbis"
 
 SUBMODULES_OK=1
-if ! [ -f "$DIR/godot_include/gdnative_api_struct.gen.h" ]; then
-    echo "godot_include headers are missing."
+if ! [ -f "$DIR/godot-cpp/gdextension/gdextension_interface.h" ]; then
+    echo "godot-cpp headers are missing."
     echo "    Please run the following:"
     echo ""
-    echo "    git submodule update --init godot_include"
+    echo "    git submodule update --init godot-cpp"
     echo ""
     SUBMODULES_OK=
 fi
 
 if ! [ -f "$DIR/ffmpeg-static/build.sh" ]; then
-    echo "godot_include headers are missing."
+    echo "ffmpeg-static headers are missing."
     echo "    Please run the following:"
     echo ""
     echo "    git submodule update --init ffmpeg-static"

@@ -130,6 +130,7 @@ private:
 	bool read_frame();
 	void update_texture();
 	PackedByteArray get_video_frame();
+	int get_audio_frame(int pcm_remaining);
 
 private:
 	videodecoder_data_struct data;
@@ -139,6 +140,9 @@ private:
 	bool seek_backward = false;
 	double delay_compensation = 0.0;
 	double time = 0.0;
+	PackedFloat32Array pcm;
+	int pcm_write_idx;
+	int samples_decoded;
 };
 
 class VideoStreamFFMPEG : public VideoStream {

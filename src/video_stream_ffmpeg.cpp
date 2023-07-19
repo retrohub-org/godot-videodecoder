@@ -7,6 +7,7 @@
 
 #define IO_BUFFER_SIZE 512 * 1024 // File reading buffer of 512 KiB
 #define AUDIO_BUFFER_MAX_SIZE 192000
+#define AUX_BUFFER_SIZE 1024
 // TODO: is this sample rate defined somewhere in the godot api etc?
 #define AUDIO_MIX_RATE 22050
 
@@ -402,6 +403,15 @@ void VideoStreamPlaybackFFMPEG::_set_file(const String &p_file) {
 	data.drop_frame = 0;
 	data.total_frame = 0;
 
+	// Only do memset if num_channels > 0 otherwise it will crash.
+	int num_channels = _get_channels();
+	if (num_channels > 0) {
+		pcm.resize(num_channels * AUX_BUFFER_SIZE);
+		pcm.fill(0);
+	}
+
+	pcm_write_idx = -1;
+
 	Ref<Image> img = Image::create(data.vcodec_ctx->width, data.vcodec_ctx->height, false, Image::FORMAT_RGBA8);
 	texture->set_image(img);
 }
@@ -435,10 +445,10 @@ void VideoStreamPlaybackFFMPEG::_update(double p_delta) {
 	read_frame();
 
 	// Don 't mix if there' s no audio(num_channels == 0).if (mix_callback && num_channels > 0) {
-	/*if (mix_callback && num_channels > 0) {
+	if (_get_channels() > 0) {
 		if (pcm_write_idx >= 0) {
 			// Previous remains
-			int mixed = mix_callback(mix_udata, pcm + pcm_write_idx * num_channels, samples_decoded);
+			int mixed = mix_audio(samples_decoded, pcm, pcm_write_idx * _get_channels());
 			if (mixed == samples_decoded) {
 				pcm_write_idx = -1;
 			} else {
@@ -447,15 +457,15 @@ void VideoStreamPlaybackFFMPEG::_update(double p_delta) {
 			}
 		}
 		if (pcm_write_idx < 0) {
-			samples_decoded = interface->get_audioframe(data_struct, pcm, AUX_BUFFER_SIZE);
-			pcm_write_idx = mix_callback(mix_udata, pcm, samples_decoded);
+			samples_decoded = get_audio_frame(AUX_BUFFER_SIZE);
+			pcm_write_idx = mix_audio(samples_decoded, pcm);
 			if (pcm_write_idx == samples_decoded) {
 				pcm_write_idx = -1;
 			} else {
 				samples_decoded -= pcm_write_idx;
 			}
 		}
-	}*/
+	}
 
 	if (seek_backward) {
 		update_texture();
@@ -823,6 +833,105 @@ retry:
 	// we don't need this behavior as we already handle frame skipping internally.
 	data.position_type = POS_TIME;
 	return data.frame_unwrapped ? data.unwrapped_frame : PackedByteArray();
+}
+
+int VideoStreamPlaybackFFMPEG::get_audio_frame(int pcm_remaining) {
+	if (data.audiostream_idx < 0) {
+		return 0;
+	}
+	bool first_frame = true;
+
+	// if playback has just started or just seeked then we enter the audio_reset state.
+	// during audio_reset it's important to skip old samples
+	// _and_ avoid sending samples from the future until the presentation timestamp syncs up.
+	bool audio_reset = isnan(data.audio_time) || data.audio_time > data.time - data.diff_tolerance;
+
+	const int pcm_buffer_size = pcm_remaining;
+	int pcm_offset = 0;
+
+	double p_time = data.audio_frame->pts * av_q2d(data.format_ctx->streams[data.audiostream_idx]->time_base);
+
+	if (audio_reset && data.num_decoded_samples > 0) {
+		// don't send any pcm data if the frame hasn't started yet
+		if (p_time > data.time) {
+			return 0;
+		}
+		// skip the any decoded samples if their presentation timestamp is too old
+		if (data.time - p_time > data.diff_tolerance) {
+			data.num_decoded_samples = 0;
+		}
+	}
+
+	int sample_count = (pcm_remaining < data.num_decoded_samples) ? pcm_remaining : data.num_decoded_samples;
+
+	if (sample_count > 0) {
+		memcpy(pcm.ptrw(), data.audio_buffer + data.acodec_ctx->channels * data.audio_buffer_pos, sizeof(float) * sample_count * data.acodec_ctx->channels);
+		pcm_offset += sample_count;
+		pcm_remaining -= sample_count;
+		data.num_decoded_samples -= sample_count;
+		data.audio_buffer_pos += sample_count;
+	}
+	while (pcm_remaining > 0) {
+		if (data.num_decoded_samples <= 0) {
+			AVPacket pkt;
+
+			int ret;
+		retry_audio:
+			ret = avcodec_receive_frame(data.acodec_ctx, data.audio_frame);
+			if (ret == AVERROR(EAGAIN)) {
+				// need to call avcodec_send_packet, get a packet from queue to send it
+				if (!data.audio_packet_queue->get(&pkt)) {
+					if (pcm_offset == 0) {
+						// if we haven't got any on-time audio yet, then the audio_time counter is meaningless.
+						data.audio_time = NAN;
+					}
+					return pcm_offset;
+				}
+				ret = avcodec_send_packet(data.acodec_ctx, &pkt);
+				if (ret < 0) {
+					ERR_PRINT(vformat("avcodec_send_packet returns %d", ret));
+					av_packet_unref(&pkt);
+					return pcm_offset;
+				}
+				av_packet_unref(&pkt);
+				goto retry_audio;
+			} else if (ret < 0) {
+				ERR_PRINT(vformat("avcodec_receive_frame returns %d", ret));
+				return pcm_buffer_size - pcm_remaining;
+			}
+			// only set the audio frame time if this is the first frame we've decoded during this update.
+			// any remaining frames are going into a buffer anyways
+			p_time = data.audio_frame->pts * av_q2d(data.format_ctx->streams[data.audiostream_idx]->time_base);
+			if (first_frame) {
+				data.audio_time = p_time;
+				first_frame = false;
+			}
+			// decoded audio ready here
+			data.num_decoded_samples = swr_convert(data.swr_ctx, (uint8_t **)&data.audio_buffer, data.audio_frame->nb_samples, (const uint8_t **)data.audio_frame->extended_data, data.audio_frame->nb_samples);
+			// data.num_decoded_samples = _interleave_audio_frame(data.audio_buffer, data.audio_frame);
+			data.audio_buffer_pos = 0;
+		}
+		if (audio_reset) {
+			if (data.time - p_time > data.diff_tolerance) {
+				// skip samples if the frame time is too far in the past
+				data.num_decoded_samples = 0;
+			} else if (p_time > data.time) {
+				// don't send any pcm data if the first frame hasn't started yet
+				data.audio_time = NAN;
+				break;
+			}
+		}
+		sample_count = pcm_remaining < data.num_decoded_samples ? pcm_remaining : data.num_decoded_samples;
+		if (sample_count > 0) {
+			memcpy(pcm.ptrw() + pcm_offset * data.acodec_ctx->channels, data.audio_buffer + data.acodec_ctx->channels * data.audio_buffer_pos, sizeof(float) * sample_count * data.acodec_ctx->channels);
+			pcm_offset += sample_count;
+			pcm_remaining -= sample_count;
+			data.num_decoded_samples -= sample_count;
+			data.audio_buffer_pos += sample_count;
+		}
+	}
+
+	return pcm_offset;
 }
 
 void VideoStreamFFMPEG::_bind_methods() {}

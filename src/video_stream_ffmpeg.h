@@ -1,21 +1,12 @@
 #ifndef VIDEO_STREAM_FFMPEG_H
 #define VIDEO_STREAM_FFMPEG_H
 
-#include <godot_cpp/classes/audio_server.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/resource_format_loader.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/video_stream_playback.hpp>
 #include <godot_cpp/classes/video_stream.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
-
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/avutil.h>
-#include <libavutil/imgutils.h>
-#include <libavutil/opt.h>
-#include <libswresample/swresample.h>
-#include <libswscale/swscale.h>
 
 namespace godot {
 
@@ -68,14 +59,25 @@ public:
 		pb->_set_file(file);
 		return pb;
 	}
+
+	VideoStreamFFMPEG() {}
+	~VideoStreamFFMPEG() {}
 };
 
-class ResourceFormatLoaderFFMPEG : public ResourceFormatLoader {
+class VideoStreamFFMPEGLoader : public ResourceFormatLoader {
+	GDCLASS(VideoStreamFFMPEGLoader, ResourceFormatLoader);
+
+protected:
+	static void _bind_methods() {};
+
 public:
-	virtual Ref<Resource> _load(const String &p_path, const String &p_original_path = "", Error *r_error = nullptr, bool p_use_sub_threads = false, float *r_progress = nullptr, CacheMode p_cache_mode = CACHE_MODE_REUSE);
-	virtual void _get_recognized_extensions(List<String> *p_extensions) const;
-	virtual bool _handles_type(const String &p_type) const;
-	virtual String _get_resource_type(const String &p_path) const;
+	virtual Variant _load(const String &p_path, const String &p_original_path, bool p_use_sub_threads, int32_t p_cache_mode = CACHE_MODE_REUSE) const override;
+	virtual PackedStringArray _get_recognized_extensions() const override;
+	virtual bool _handles_type(const StringName &p_type) const override;
+	virtual String _get_resource_type(const String &p_path) const override;
+
+	VideoStreamFFMPEGLoader() {}
+	~VideoStreamFFMPEGLoader() {}
 };
 
 } // namespace godot

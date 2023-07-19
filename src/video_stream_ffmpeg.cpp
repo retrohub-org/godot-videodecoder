@@ -1,5 +1,13 @@
 #include "video_stream_ffmpeg.h"
 
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/avutil.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
+#include <libswresample/swresample.h>
+#include <libswscale/swscale.h>
+
 using namespace godot;
 
 void VideoStreamPlaybackFFMPEG::_bind_methods()
@@ -64,17 +72,33 @@ VideoStreamPlaybackFFMPEG::~VideoStreamPlaybackFFMPEG() {
 
 void VideoStreamFFMPEG::_bind_methods() {}
 
-Ref<Resource> ResourceFormatLoaderFFMPEG::_load(const String &p_path, const String &p_original_path, Error *r_error, bool p_use_sub_threads, float *r_progress, CacheMode p_cache_mode) {
-	return nullptr;
+Variant VideoStreamFFMPEGLoader::_load(const String &p_path, const String &p_original_path, bool p_use_sub_threads, int32_t p_cache_mode) const {
+	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::READ);
+	if (f.is_null()) {
+		return Ref<Resource>();
+	}
+
+	Ref<VideoStreamFFMPEG> stream;
+	stream.instantiate();
+	stream->set_file(p_path);
+
+	return stream;
 }
 
-void ResourceFormatLoaderFFMPEG::_get_recognized_extensions(List<String> *p_extensions) const {
+PackedStringArray VideoStreamFFMPEGLoader::_get_recognized_extensions() const {
+	PackedStringArray arr;
+	arr.push_back("mp4");
+	return arr;
 }
 
-bool ResourceFormatLoaderFFMPEG::_handles_type(const String &p_type) const {
-	return false;
+bool VideoStreamFFMPEGLoader::_handles_type(const StringName &p_type) const {
+	return p_type.to_lower() == "videostream";
 }
 
-String ResourceFormatLoaderFFMPEG::_get_resource_type(const String &p_path) const {
+String VideoStreamFFMPEGLoader::_get_resource_type(const String &p_path) const {
+	String extension = p_path.get_extension().to_lower();
+	if (extension == "mp4") {
+		return "VideoStreamFFMPEG";
+	}
 	return "";
 }

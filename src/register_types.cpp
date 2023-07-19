@@ -12,15 +12,18 @@
 
 using namespace godot;
 
-Ref<VideoStreamFFMPEG> loader;
+Ref<VideoStreamFFMPEGLoader> loader;
 
 void initialize_videodecoder(godot::ModuleInitializationLevel init_level) {
 	if (init_level != godot::ModuleInitializationLevel::MODULE_INITIALIZATION_LEVEL_SCENE) return;
 
+	GDREGISTER_CLASS(VideoStreamFFMPEGLoader);
 	GDREGISTER_CLASS(VideoStreamFFMPEG);
+	GDREGISTER_CLASS(VideoStreamPlaybackFFMPEG);
 
 	loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(loader, true);
+	std::cout << "VideoDecoder initialized" << std::endl;
 }
 
 void uninitialize_videodecoder(godot::ModuleInitializationLevel init_level) {
@@ -28,6 +31,7 @@ void uninitialize_videodecoder(godot::ModuleInitializationLevel init_level) {
 
 	ResourceLoader::get_singleton()->remove_resource_format_loader(loader);
 	loader.unref();
+	std::cout << "VideoDecoder uninitialized" << std::endl;
 }
 
 extern "C" {

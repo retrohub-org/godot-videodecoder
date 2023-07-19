@@ -2,21 +2,103 @@
 #define VIDEO_STREAM_FFMPEG_H
 
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/resource_format_loader.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/video_stream_playback.hpp>
 #include <godot_cpp/classes/video_stream.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/avutil.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
+#include <libswresample/swresample.h>
+#include <libswscale/swscale.h>
+}
+
 namespace godot {
+
+class FFMPEGPacketQueue {
+
+public:
+	FFMPEGPacketQueue();
+	~FFMPEGPacketQueue();
+
+	void flush();
+	int put(AVPacket *pkt);
+	int get(AVPacket *pkt);
+
+public:
+	AVPacketList *first_pkt, *last_pkt;
+	int nb_packets;
+	int size;
+};
 
 class VideoStreamPlaybackFFMPEG : public VideoStreamPlayback {
 	GDCLASS(VideoStreamPlaybackFFMPEG, VideoStreamPlayback);
+
+private:
+	enum POSITION_TYPE {
+		POS_V_PTS,
+		POS_TIME,
+		POS_A_TIME
+	};
+
+	struct videodecoder_data_struct {
+		AVIOContext *io_ctx;
+		AVFormatContext *format_ctx;
+		AVCodecContext *vcodec_ctx;
+		AVFrame *frame_yuv;
+		AVFrame *frame_rgb;
+
+		struct SwsContext *sws_ctx;
+		uint8_t *frame_buffer;
+
+		int videostream_idx;
+		int frame_buffer_size;
+		PackedByteArray unwrapped_frame;
+		double time;
+
+		double audio_time;
+		double diff_tolerance;
+
+		int audiostream_idx;
+		AVCodecContext *acodec_ctx;
+		bool acodec_open;
+		AVFrame *audio_frame;
+		void *mix_udata;
+
+		int num_decoded_samples;
+		float *audio_buffer;
+		int audio_buffer_pos;
+
+		SwrContext *swr_ctx;
+
+		FFMPEGPacketQueue *audio_packet_queue;
+		FFMPEGPacketQueue *video_packet_queue;
+
+		unsigned long drop_frame;
+		unsigned long total_frame;
+
+		double seek_time;
+
+		enum POSITION_TYPE position_type;
+		uint8_t *io_buffer;
+		bool vcodec_open;
+		bool input_open;
+		bool frame_unwrapped;
+	};
 
 protected:
 	static void _bind_methods();
 
 public:
+	static int raw_file_read(void *ptr, uint8_t *buf, int buf_size);
+	static int64_t raw_file_seek(void *ptr, int64_t pos, int whence);
+
 	virtual void _play() override;
 	virtual void _stop() override;
 	virtual bool _is_playing() const override;
@@ -41,12 +123,27 @@ public:
 
 	VideoStreamPlaybackFFMPEG();
 	~VideoStreamPlaybackFFMPEG();
+
+private:
+	void _cleanup();
+	void flush_frames(AVCodecContext* ctx);
+	bool read_frame();
+	void update_texture();
+	PackedByteArray get_video_frame();
+
+private:
+	videodecoder_data_struct data;
+	Ref<FileAccess> file;
+	Ref<ImageTexture> texture;
+	bool playing = false, paused = false;
+	bool seek_backward = false;
+	double delay_compensation = 0.0;
+	double time = 0.0;
 };
 
 class VideoStreamFFMPEG : public VideoStream {
 	GDCLASS(VideoStreamFFMPEG, VideoStream);
 
-	String file;
 	int audio_track = 0;
 
 protected:
@@ -56,7 +153,7 @@ public:
 	Ref<VideoStreamPlayback> _instantiate_playback() override {
 		Ref<VideoStreamPlaybackFFMPEG> pb = memnew(VideoStreamPlaybackFFMPEG);
 		pb->_set_audio_track(audio_track);
-		pb->_set_file(file);
+		pb->_set_file(get_file());
 		return pb;
 	}
 

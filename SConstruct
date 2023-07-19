@@ -20,9 +20,9 @@ opts = Variables([], ARGUMENTS)
 
 # Define our options
 opts.Add(EnumVariable("target", "Compilation target", "template_debug", ["template_debug", "template_release"]))
-opts.Add(EnumVariable("platform", "Compilation platform", host_platform, ["", "windows", "x11", "linux", "osx"]))
+opts.Add(EnumVariable("platform", "Compilation platform", host_platform, ["", "windows", "linux", "osx"]))
 opts.Add(
-    EnumVariable("p", "Compilation target, alias for 'platform'", host_platform, ["", "windows", "x11", "linux", "osx"])
+    EnumVariable("p", "Compilation target, alias for 'platform'", host_platform, ["", "windows", "linux", "osx"])
 )
 opts.Add(EnumVariable("bits", "Target platform bits", "64", ("32", "64")))
 opts.Add(BoolVariable("use_llvm", "Use the LLVM / Clang compiler", "no"))
@@ -173,9 +173,20 @@ cpp_library += ".%s" % env["target"]
 
 cpp_library += "." + str(env_arch)
 
+lib_prefix = "thirdparty/" + env['platform']
+
+msvc_build = os.name == 'nt'
+if msvc_build:
+    lib_path = lib_prefix + '/bin'
+else:
+    lib_path = lib_prefix + '/lib'
+include_path = lib_prefix + '/include'
+env.Prepend(CPPPATH=["#" + include_path + "/"])
+
 # make sure our binding library is properly includes
 env.Append(CPPPATH=[".", godot_headers_path, cpp_bindings_path + "include/", cpp_bindings_path + "gen/include/"])
 env.Append(LIBPATH=[cpp_bindings_path + "bin/"])
+env.Append(LIBPATH=[lib_path])
 env.Append(LIBS=['avformat'])
 env.Append(LIBS=['avcodec'])
 env.Append(LIBS=['avutil'])
@@ -208,16 +219,6 @@ def add_source_files(self, arr, regex):
 
 env.__class__.add_source_files = add_source_files 
 
-lib_prefix = "thirdparty/" + env['platform']
-
-msvc_build = os.name == 'nt'
-if msvc_build:
-    lib_path = lib_prefix + '/bin'
-else:
-    lib_path = lib_prefix + '/lib'
-include_path = lib_prefix + '/include'
-env.Prepend(CPPPATH=["#" + include_path + "/"])
-
 target_name = ""
 lib_target = env["target_path"]
 if env["target"] in ("template_debug"):
@@ -225,9 +226,59 @@ if env["target"] in ("template_debug"):
 else:
     target_name = "Release"
 
-lib_name = f'{env["target_name"]}-{env["platform"]}-{env["target"]}-{env["arch"]}'
+lib_name = '%s-%s-%s-%s' % (env["target_name"], env["platform"], env["target"], env["arch"])
+
+if env['platform'] == 'linux':
+    env.Append(RPATH=env.Literal('\$$ORIGIN'))
+    if env['bits'] == '32':
+        env.Append(LIBS=[File('/usr/lib32/libc_nonshared.a')])
+        env.Append(CFLAGS=['-m32'])
+        env.Append(LINKFLAGS=['-m32'])
+    else:
+        env.Append(LIBS=[File('/usr/lib/libc_nonshared.a')])
+if env['platform'] == 'windows' and env['bits'] == '32':
+    env.Append(LIBS=['pthread'])
+    env.Append(LINKFLAGS=['-static-libgcc'])
+
+tool_prefix = ''
+if os.name == 'posix' and env['platform'] == 'win64':
+    tool_prefix = "x86_64-w64-mingw32-"
+    env['SHLIBSUFFIX'] = '.dll'
+    env.Append(CPPDEFINES='WIN32')
+if os.name == 'posix' and env['platform'] == 'win32':
+    tool_prefix = "i686-w64-mingw32-"
+    env['SHLIBSUFFIX'] = '.dll'
+    env.Append(CPPDEFINES='WIN32')
+if os.name == 'posix' and env['platform'] == 'osx':
+    tool_prefix = 'x86_64-apple-darwin' + env['darwinver'] + '-'
+    if (os.getenv("OSXCROSS_PREFIX")):
+        tool_prefix = os.getenv('OSXCROSS_PREFIX')
+    env['SHLIBSUFFIX'] = '.dylib'
+
+globs = {
+    'linux': '*.so.[0-9]*',
+    'windows': '../bin/*-[0-9]*.dll',
+    'osx': '*.[0-9]*.dylib',
+    'x11_32': '*.so.[0-9]*',
+    'win32': '../bin/*-[0-9]*.dll',
+}
+
+from glob import glob
+
+ffmpeg_dylibs = glob(lib_path + '/' + globs[env['platform']])
+
+if env['platform'].startswith('win') and tool_prefix:
+    # mingw needs libwinpthread-1.dll which should be here. (remove trailing '-' from tool_prefix)
+    winpthread = '/usr/%s/lib/libwinpthread-1.dll' % tool_prefix[:-1]
+    ffmpeg_dylibs.append(winpthread)
+
+installed_dylib = []
+for dylib in ffmpeg_dylibs:
+    installed_dylib.append(env.Install(lib_target,dylib))
+
 
 library = env.SharedLibrary(target = lib_target + lib_name, source=env.sources+env.modules_sources)
+
 
 if env["vsproj"]:
     vsproj = env.MSVSProject(target = 'godot_video_reference' + env['MSVSPROJECTSUFFIX'],
@@ -240,4 +291,5 @@ if env["vsproj"]:
                     variant = [target_name + '|'+env['msvc_arch']] * len(library)
                     )
 
+Default(env.Install(lib_target, ffmpeg_dylibs))
 Default(library)

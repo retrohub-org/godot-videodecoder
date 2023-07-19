@@ -8,7 +8,7 @@ import sys
 if sys.platform.startswith("linux"):
     host_platform = "linux"
 elif sys.platform == "darwin":
-    host_platform = "osx"
+    host_platform = "macos"
 elif sys.platform == "win32" or sys.platform == "msys":
     host_platform = "windows"
 else:
@@ -20,75 +20,33 @@ opts = Variables([], ARGUMENTS)
 
 # Define our options
 opts.Add(EnumVariable("target", "Compilation target", "template_debug", ["template_debug", "template_release"]))
-opts.Add(EnumVariable("platform", "Compilation platform", host_platform, ["", "windows", "linux", "osx"]))
-opts.Add(
-    EnumVariable("p", "Compilation target, alias for 'platform'", host_platform, ["", "windows", "linux", "osx"])
-)
+opts.Add(EnumVariable("platform", "Compilation platform", host_platform, ["", "windows", "macos", "linux"]))
 opts.Add(EnumVariable("bits", "Target platform bits", "64", ("32", "64")))
 opts.Add(BoolVariable("use_llvm", "Use the LLVM / Clang compiler", "no"))
-opts.Add(BoolVariable("dev_build", "Debug symbols", "yes"))
+opts.Add(PathVariable('toolchainbin', 'Path to the cross compiler toolchain bin directory. Only needed cross compiling and the toolchain isn\'t installed.', '', PathVariable.PathAccept))
 opts.Add(PathVariable("target_path", "The path where the lib is installed.", "bin/", PathVariable.PathAccept))
 opts.Add(PathVariable("target_name", "The library name.", "libgdvideo", PathVariable.PathAccept))
+opts.Add(PathVariable("godot_cpp_path", "The path to the godot-cpp directory.", "godot-cpp", PathVariable.PathAccept))
+opts.Add(PathVariable("thirdparty_path", "The path to the thirdparty directory.", "thirdparty", PathVariable.PathAccept))
 opts.Add(BoolVariable("vsproj", "Generate a project for Visual Studio", "no"))
-
-# Local dependency paths, adapt them to your setup
-godot_headers_path = "godot-cpp/gdextension/"
-cpp_bindings_path = "godot-cpp/"
-cpp_library = "libgodot-cpp"
-
-# only support 64 at this time.
-bits = 64
+opts.Add(PathVariable('darwinver', 'Darwin SDK version. (if cross compiling from linux to osx)', '15', PathVariable.PathAccept))
 
 # Updates the environment with the option variables.
 opts.Update(env)
 # Generates help for the -h scons option.
 Help(opts.GenerateHelpText(env))
 
-architecture_array = ["", "universal", "x86_32", "x86_64", "arm32", "arm64", "rv64", "ppc32", "ppc64", "wasm32"]
-architecture_aliases = {
-    "x64": "x86_64",
-    "amd64": "x86_64",
-    "armv7": "arm32",
-    "armv8": "arm64",
-    "arm64v8": "arm64",
-    "aarch64": "arm64",
-    "rv": "rv64",
-    "riscv": "rv64",
-    "riscv64": "rv64",
-    "ppcle": "ppc32",
-    "ppc": "ppc32",
-    "ppc64le": "ppc64",
-}
-opts.Add(EnumVariable("arch", "CPU architecture", "", architecture_array, architecture_aliases))
+# Local dependency paths, adapt them to your setup
+godot_headers_path = "godot-cpp/gdextension/"
+cpp_bindings_path = env["godot_cpp_path"] + "/"
+godotcpp_library = "libgodot-cpp"
 
-opts.Update(env)
-Help(opts.GenerateHelpText(env))
+if env["platform"] == "macos" and env["bits"] == "32":
+    print("32-bit builds are not supported on macOS.")
+    Exit()
 
-if env['arch'] == "":
-    # No architecture specified. Default to arm64 if building for Android,
-    # universal if building for macOS or iOS, wasm32 if building for web,
-    # otherwise default to the host architecture.
-    if env["platform"] in ["osx", "ios"]:
-        env["arch"] = "universal"
-    elif env["platform"] == "android":
-        env["arch"] = "arm64"
-    elif env["platform"] == "javascript":
-        env["arch"] = "wasm32"
-    else:
-        host_machine = platform.machine().lower()
-        if host_machine in architecture_array:
-            env["arch"] = host_machine
-        elif host_machine in architecture_aliases.keys():
-            env["arch"] = architecture_aliases[host_machine]
-        elif "86" in host_machine:
-            # Catches x86, i386, i486, i586, i686, etc.
-            env["arch"] = "x86_32"
-        else:
-            print("Unsupported CPU architecture: " + host_machine)
-            Exit()
-
-# We use this to re-set env["arch"] anytime we call opts.Update(env).
-env_arch = env["arch"]
+if env['toolchainbin']:
+    env.PrependENVPath('PATH', env['toolchainbin'])
 
 # This makes sure to keep the session environment variables on Windows.
 # This way, you can run SCons in a Visual Studio 2017 prompt and it will find
@@ -108,9 +66,6 @@ if env["use_llvm"]:
     env["CC"] = "clang"
     env["CXX"] = "clang++"
 
-if env["p"] != "":
-    env["platform"] = env["p"]
-
 if env["platform"] == "":
     print("No valid target platform selected.")
     quit()
@@ -127,9 +82,9 @@ if env["target"] in ("template_debug"):
     env.Append(CPPDEFINES=["DEBUG_ENABLED", "DEBUG_METHODS_ENABLED"])
 
 # Check our platform specifics
-if env["platform"] == "osx":
-    env["target_path"] += "osx/"
-    cpp_library += ".osx"
+if env["platform"] == "macos":
+    env["target_path"] += "/macos/"
+    godotcpp_library += ".macos"
     env.Append(CCFLAGS=["-arch", "x86_64"])
     env.Append(CXXFLAGS=["-std=c++17"])
     env.Append(LINKFLAGS=["-arch", "x86_64", "-ldl"])
@@ -138,9 +93,9 @@ if env["platform"] == "osx":
     else:
         env.Append(CCFLAGS=["-O3"])
 
-elif env["platform"] in ("x11", "linux"):
-    env["target_path"] += "x11/"
-    cpp_library += ".linux"
+elif env["platform"] in ("linux"):
+    env["target_path"] += "/linux_%s/" % env["bits"]
+    godotcpp_library += ".linux"
     env.Append(CCFLAGS=["-fPIC"])
     env.Append(CXXFLAGS=["-std=c++17"])
     if env["target"] in ("template_debug"):
@@ -149,31 +104,33 @@ elif env["platform"] in ("x11", "linux"):
         env.Append(CCFLAGS=["-O3"])
 
 elif env["platform"] == "windows":
-    env["target_path"] += "win64/"
-    cpp_library += ".windows"
+    env["target_path"] += "/windows_%s/" % env["bits"]
+    godotcpp_library += ".windows"
     # This makes sure to keep the session environment variables on windows,
     # that way you can run scons in a vs 2017 prompt and it will find all the required tools
     env.Append(ENV=os.environ)
 
     env.Append(CPPDEFINES=["WIN32", "_WIN32", "_WINDOWS", "_CRT_SECURE_NO_WARNINGS", "_ITERATOR_DEBUG_LEVEL=2"])
-    env.Append(CCFLAGS=["-W3", "-GR"])
-    env.Append(CXXFLAGS=["-std:c++17"])
+    env.Append(CXXFLAGS=["-std=c++17"])
     if env["target"] in ("template_debug"):
-        env.Append(CPPDEFINES=["_DEBUG"])
-        env.Append(CCFLAGS=["-EHsc", "-MDd", "-ZI", "-FS"])
-        env.Append(LINKFLAGS=["-DEBUG", "/MACHINE:" + env['msvc_arch']])
+        env.Append(CCFLAGS=["-g", "-O2"])
     else:
-        env.Append(CPPDEFINES=["NDEBUG"])
-        env.Append(CCFLAGS=["-O2", "-EHsc", "-MD"])
+        env.Append(CCFLAGS=["-O3"])
 
     if not(env["use_llvm"]):
         env.Append(CPPDEFINES=["TYPED_METHOD_BIND"])
 
-cpp_library += ".%s" % env["target"]
+godotcpp_library += ".%s" % env["target"]
 
-cpp_library += "." + str(env_arch)
+if env["bits"] == "32":
+    godotcpp_library += ".x86_32"
+else:
+    godotcpp_library += ".x86_64"
 
-lib_prefix = "thirdparty/" + env['platform']
+if env["platform"] == "macos":
+    lib_prefix = "%s/%s" % (env['thirdparty_path'], env['platform'])
+else:
+    lib_prefix = "%s/%s_%s" % (env['thirdparty_path'], env['platform'], env['bits'])
 
 msvc_build = os.name == 'nt'
 if msvc_build:
@@ -192,7 +149,7 @@ env.Append(LIBS=['avcodec'])
 env.Append(LIBS=['avutil'])
 env.Append(LIBS=['swscale'])
 env.Append(LIBS=['swresample'])
-env.Append(LIBS=[cpp_library])
+env.Append(LIBS=[godotcpp_library])
 
 # tweak this if you want to use different folders, or more folders, to store your source code in.
 env.Append(CPPPATH=["src/"])
@@ -226,41 +183,49 @@ if env["target"] in ("template_debug"):
 else:
     target_name = "Release"
 
-lib_name = '%s-%s-%s-%s' % (env["target_name"], env["platform"], env["target"], env["arch"])
-
 if env['platform'] == 'linux':
     env.Append(RPATH=env.Literal('\$$ORIGIN'))
     if env['bits'] == '32':
-        env.Append(LIBS=[File('/usr/lib32/libc_nonshared.a')])
-        env.Append(CFLAGS=['-m32'])
+        #env.Append(LIBS=[File('/usr/lib32/libc_nonshared.a')])
+        env.Append(CCFLAGS=['-m32'])
         env.Append(LINKFLAGS=['-m32'])
-    else:
-        env.Append(LIBS=[File('/usr/lib/libc_nonshared.a')])
+    #else:
+    #    env.Append(LIBS=[File('/usr/lib/libc_nonshared.a')])
 if env['platform'] == 'windows' and env['bits'] == '32':
     env.Append(LIBS=['pthread'])
     env.Append(LINKFLAGS=['-static-libgcc'])
 
 tool_prefix = ''
-if os.name == 'posix' and env['platform'] == 'win64':
+if os.name == 'posix' and env['platform'] == 'windows' and env['bits'] == '64':
     tool_prefix = "x86_64-w64-mingw32-"
     env['SHLIBSUFFIX'] = '.dll'
     env.Append(CPPDEFINES='WIN32')
-if os.name == 'posix' and env['platform'] == 'win32':
+if os.name == 'posix' and env['platform'] == 'windows' and env['bits'] == '32':
     tool_prefix = "i686-w64-mingw32-"
     env['SHLIBSUFFIX'] = '.dll'
     env.Append(CPPDEFINES='WIN32')
-if os.name == 'posix' and env['platform'] == 'osx':
+if os.name == 'posix' and env['platform'] == 'macos':
     tool_prefix = 'x86_64-apple-darwin' + env['darwinver'] + '-'
     if (os.getenv("OSXCROSS_PREFIX")):
         tool_prefix = os.getenv('OSXCROSS_PREFIX')
     env['SHLIBSUFFIX'] = '.dylib'
 
+if tool_prefix:
+    env['CC'] = tool_prefix + env['CC']
+    env['AS'] = tool_prefix + env['AS']
+    env['CXX'] = tool_prefix + env['CXX']
+    env['AR'] = tool_prefix + env['AR']
+    env['RANLIB'] = tool_prefix + env['RANLIB']
+    if env['toolchainbin']:
+        # there's probably a better way to pass the PATH to the renamer script
+        env['TOOL_PREFIX'] = env['toolchainbin'] + '/' + tool_prefix
+    else:
+        env['TOOL_PREFIX'] = tool_prefix
+
 globs = {
-    'linux': '*.so.[0-9]*',
     'windows': '../bin/*-[0-9]*.dll',
-    'osx': '*.[0-9]*.dylib',
-    'x11_32': '*.so.[0-9]*',
-    'win32': '../bin/*-[0-9]*.dll',
+    'macos': '*.[0-9]*.dylib',
+    'linux': '*.so.[0-9]*',
 }
 
 from glob import glob
@@ -277,7 +242,7 @@ for dylib in ffmpeg_dylibs:
     installed_dylib.append(env.Install(lib_target,dylib))
 
 
-library = env.SharedLibrary(target = lib_target + lib_name, source=env.sources+env.modules_sources)
+library = env.SharedLibrary(target = lib_target + "%s-%s" % (env["target_name"], env["target"]), source=env.sources+env.modules_sources)
 
 
 if env["vsproj"]:

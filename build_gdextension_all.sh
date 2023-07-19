@@ -1,2 +1,2 @@
 #!/bin/sh
-PLATFORMS="win64,win32,osx,x11,x11_32" ./build_gdextension.sh
+PLATFORMS="windows_64,windows_32,macos,linux_64,linux_32" ./build_gdextension.sh

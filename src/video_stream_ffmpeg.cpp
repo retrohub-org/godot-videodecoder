@@ -89,6 +89,10 @@ void VideoStreamPlaybackFFMPEG::_play() {
 }
 
 void VideoStreamPlaybackFFMPEG::_stop() {
+	if (playing) {
+		_seek(0);
+	}
+	playing = false;
 }
 
 bool VideoStreamPlaybackFFMPEG::_is_playing() const {
@@ -788,11 +792,11 @@ retry:
 		// only discard frames for max_frame_drop_time ms or we'll slow down the game's main thread!
 		if (fabs(data.seek_time - data.time) > data.diff_tolerance * 10) {
 			WARN_PRINT(
-				vformat("Slow CPU? Dropped  %d frames for %" PRId64 "ms frame dropped: %lu/%lu (%.1f%%) pts=%.1f t=%.1f",
+				vformat("Slow CPU? Dropped %d frames for %dms frame dropped: %d/%d (%.1f%%) pts=%.1f t=%.1f",
 					(int)drop_count,
-					drop_duration,
-					data.drop_frame,
-					data.total_frame,
+					(int)drop_duration,
+					(int)data.drop_frame,
+					(int)data.total_frame,
 					100.0 * data.drop_frame / data.total_frame,
 					ts, (double)data.time)
 			);

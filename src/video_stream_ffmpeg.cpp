@@ -146,9 +146,6 @@ void VideoStreamPlaybackFFMPEG::_seek(double p_time) {
 	if (p_time < 0) {
 		p_time = data.format_ctx->duration / (double)AV_TIME_BASE;
 	}
-	if (p_time < time) {
-		seek_backward = true;
-	}
 	int64_t seek_target = p_time * AV_TIME_BASE;
 	// seek within 10 seconds of the selected spot.
 	int64_t margin = 10 * AV_TIME_BASE;
@@ -178,6 +175,15 @@ void VideoStreamPlaybackFFMPEG::_seek(double p_time) {
 		data.position_type = POS_A_TIME;
 		data.audio_time = NAN;
 	}
+
+	if (p_time < time) {
+		seek_backward = true;
+	}
+	time = p_time;
+	// reset audio buffers
+	pcm.fill(0);
+	pcm_write_idx = -1;
+	samples_decoded = 0;
 }
 
 void VideoStreamPlaybackFFMPEG::_set_file(const String &p_file) {

@@ -24,7 +24,7 @@ opts.Add(EnumVariable("platform", "Compilation platform", host_platform, ["", "w
 opts.Add(EnumVariable("bits", "Target platform bits", "64", ("32", "64")))
 opts.Add(BoolVariable("use_llvm", "Use the LLVM / Clang compiler", "no"))
 opts.Add(PathVariable('toolchainbin', 'Path to the cross compiler toolchain bin directory. Only needed cross compiling and the toolchain isn\'t installed.', '', PathVariable.PathAccept))
-opts.Add(PathVariable("target_path", "The path where the lib is installed.", "bin/", PathVariable.PathAccept))
+opts.Add(PathVariable("target_path", "The path where the lib is installed.", "target/", PathVariable.PathAccept))
 opts.Add(PathVariable("target_name", "The library name.", "libgdvideo", PathVariable.PathAccept))
 opts.Add(PathVariable("godot_cpp_path", "The path to the godot-cpp directory.", "godot-cpp", PathVariable.PathAccept))
 opts.Add(PathVariable("thirdparty_path", "The path to the thirdparty directory.", "thirdparty", PathVariable.PathAccept))

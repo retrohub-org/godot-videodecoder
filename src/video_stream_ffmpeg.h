@@ -90,6 +90,8 @@ private:
 		bool vcodec_open;
 		bool input_open;
 		bool frame_unwrapped;
+
+		bool loaded;
 	};
 
 protected:

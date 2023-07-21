@@ -142,6 +142,10 @@ double VideoStreamPlaybackFFMPEG::_get_playback_position() const {
 }
 
 void VideoStreamPlaybackFFMPEG::_seek(double p_time) {
+	if(!data.loaded) {
+		return;
+	}
+
 	// Hack to find the end of the video. Really VideoPlayer should expose this!
 	if (p_time < 0) {
 		p_time = data.format_ctx->duration / (double)AV_TIME_BASE;
@@ -413,6 +417,8 @@ void VideoStreamPlaybackFFMPEG::_set_file(const String &p_file) {
 	data.drop_frame = 0;
 	data.total_frame = 0;
 
+	data.loaded = true;
+
 	// Only do memset if num_channels > 0 otherwise it will crash.
 	int num_channels = _get_channels();
 	if (num_channels > 0) {
@@ -438,7 +444,7 @@ void VideoStreamPlaybackFFMPEG::_update(double p_delta) {
 	if (!playing || paused) {
 		return;
 	}
-	if (!file.is_valid()) {
+	if (!file.is_valid() || !data.loaded) {
 		return;
 	}
 	time += p_delta;
@@ -597,6 +603,8 @@ VideoStreamPlaybackFFMPEG::VideoStreamPlaybackFFMPEG() {
 	data.frame_unwrapped = false;
 	data.unwrapped_frame = PackedByteArray();
 
+	data.loaded = false;
+
 	texture = Ref<ImageTexture>(memnew(ImageTexture));
 }
 
@@ -698,6 +706,8 @@ void VideoStreamPlaybackFFMPEG::_cleanup() {
 
 	data.drop_frame = 0;
 	data.total_frame = 0;
+
+	data.loaded = false;
 }
 
 void VideoStreamPlaybackFFMPEG::flush_frames(AVCodecContext *ctx) {
